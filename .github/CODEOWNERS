@@ -1,0 +1,24 @@
+# Code Owners
+# These owners will be requested for review when someone opens a PR
+
+# Core config files
+*.jsonc @aadil96
+*.toml @aadil96
+
+# Agent definitions
+agents/ @aadil96
+agent/ @aadil96
+
+# Skills
+skills/ @aadil96
+
+# Workflows and templates
+templates/ @aadil96
+
+# Setup scripts
+scripts/ @aadil96
+
+# Documentation
+README.md @aadil96
+CONTRIBUTING.md @aadil96
+CHANGELOG.md @aadil96

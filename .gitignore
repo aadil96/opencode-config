@@ -4,3 +4,6 @@ node_modules/
 .env
 .env.*
 !.env.example
+
+# Personal workflow guardrails — not for open-source distribution
+.opencode/
