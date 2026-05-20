@@ -202,14 +202,6 @@
       "url": "https://mcp.grep.app",
       "enabled": true
     },
-    "linear": {
-      "type": "remote",
-      "url": "https://mcp.linear.app/mcp",
-      "headers": {
-        "Authorization": "Bearer ${LINEAR_API_KEY}"
-      },
-      "enabled": true
-    },
     "agentmemory": {
       "type": "local",
       "command": [
