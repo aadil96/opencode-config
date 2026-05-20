@@ -1,0 +1,23 @@
+# mise.toml — Tool prerequisites for opencode-config
+#
+# Usage: mise install
+#
+# Note: The "iii" engine is required by agentmemory but is NOT available
+# via mise. Install it manually from:
+#   https://github.com/iii-hq/iii/releases
+
+[tools]
+# JavaScript runtime — required for opencode and plugin tooling
+node = "23.11.0"
+
+# Fast JS runtime — required for opencode plugins
+bun = "1.3.13"
+
+# OCX CLI — opencode extension manager (optional, for kdco plugins)
+# Install registry: ocx registry add https://registry.kdco.dev --name kdco
+# Add plugins:     ocx add kdco/workspace
+"npm:ocx" = "latest"
+
+# AgentMemory CLI — persistent memory MCP server
+# Run in background: agentmemory
+"npm:@agentmemory/agentmemory" = "latest"
