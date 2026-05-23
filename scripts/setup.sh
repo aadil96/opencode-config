@@ -2,16 +2,27 @@
 #
 # setup.sh — Install OpenCode config guardrails and AgentMemory service
 #
-# Usage: ./scripts/setup.sh
+# Usage: ./scripts/setup.sh [-y|--yes]
 #
 # This script:
 #   1. Checks prerequisites (opencode, agentmemory/npx)
-#   2. Backs up existing ~/.config/opencode/ config
+#   2. Backs up existing ~/.config/opencode/ config (with confirmation)
 #   3. Copies repo files to ~/.config/opencode/ (asks before overwriting)
-#   4. Optionally sets up AgentMemory as a systemd user service
+#   4. Installs npm dependencies for plugins
+#   5. Optionally sets up AgentMemory as a systemd user service
+#   6. Configures AgentMemory LLM provider (optional)
 #
 # Idempotent: safe to run multiple times.
 set -euo pipefail
+
+# ─── Sourcing Guard ────────────────────────────────────────────────────────────
+# Prevent the script from exiting the user's shell if sourced.
+
+if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+    echo "Error: This script must be executed, not sourced." >&2
+    echo "Usage: ./scripts/setup.sh [-y|--yes]" >&2
+    return 1
+fi
 
 # ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -20,6 +31,15 @@ readonly SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 readonly TIMESTAMP="$(date -u +"%Y%m%dT%H%M%SZ")"
+
+# ─── Sudo Guard ────────────────────────────────────────────────────────────────
+
+if [[ $EUID -eq 0 ]] && [[ -n "$SUDO_USER" ]]; then
+    echo -e "\033[1;31m✗  Do not run this script with sudo.\033[0m" >&2
+    echo -e "\033[0;36mℹ  Run it as your normal user without sudo.\033[0m"
+    echo -e "\033[0;36mℹ  The script only modifies files in \$HOME and uses systemctl --user.\033[0m"
+    exit 1
+fi
 
 # ─── Color Output ────────────────────────────────────────────────────────────
 
@@ -35,6 +55,24 @@ success() { echo -e "${GREEN}✓  $*${RESET}"; }
 warn()    { echo -e "${YELLOW}⚠  $*${RESET}"; }
 error()   { echo -e "${RED}✗  $*${RESET}" >&2; }
 header()  { echo -e "\n${BOLD}━━━ $* ━━━${RESET}\n"; }
+
+# ─── CLI Options ──────────────────────────────────────────────────────────────
+
+ASSUME_YES=false
+
+while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+        -y|--yes)
+            ASSUME_YES=true
+            shift
+            ;;
+        *)
+            error "Unknown option: $1"
+            info "Usage: $0 [-y|--yes]"
+            exit 1
+            ;;
+    esac
+done
 
 # ─── Summary Tracking ────────────────────────────────────────────────────────
 
@@ -106,12 +144,24 @@ backup_existing() {
         return 0
     fi
 
-    local backup_dir="${CONFIG_DIR}.bak.${TIMESTAMP}"
+    # Skip prompt if --yes flag was passed
+    if [[ "$ASSUME_YES" != "true" ]]; then
+        echo -ne "${YELLOW}⚠  Existing config found at $CONFIG_DIR${RESET}\n"
+        echo -ne "${YELLOW}   Back it up before overwriting? [Y/n]: ${RESET}"
+        read -r response || true
+        if [[ ! "$response" =~ ^[Yy]$ ]] && [[ -n "$response" ]]; then
+            info "Skipping backup"
+            record_summary "backup: skipped (user declined)"
+            return 0
+        fi
+    fi
 
-    info "Existing config found at $CONFIG_DIR"
+    local backup_dir="${CONFIG_DIR}.bak.${TIMESTAMP}"
     info "Creating backup at $backup_dir"
 
     if cp -a "$CONFIG_DIR" "$backup_dir"; then
+        # Remove .git and node_modules from backup to keep it lean
+        rm -rf "$backup_dir/.git" "$backup_dir/node_modules" 2>/dev/null || true
         success "Backup created: $backup_dir"
         record_summary "backup: $backup_dir"
     else
@@ -179,13 +229,10 @@ copy_files() {
                 continue
             fi
 
-            # File differs — ask before overwriting
+            # File differs — overwrite (with prompt unless -y)
             (( conflicts++ ))
-            echo -ne "${YELLOW}⚠  File exists and differs: ${BOLD}$relative_path${RESET}\n"
-            echo -ne "${YELLOW}   Overwrite? [y/N]: ${RESET}"
-            read -r response || true
-
-            if [[ "$response" =~ ^[Yy]$ ]]; then
+            if [[ "$ASSUME_YES" == "true" ]]; then
+                # Non-interactive mode — auto-overwrite
                 if cp -f "$source_file" "$target_file"; then
                     success "Overwritten: $relative_path"
                     (( overwritten++ ))
@@ -194,8 +241,22 @@ copy_files() {
                     exit 1
                 fi
             else
-                info "Skipped: $relative_path"
-                (( skipped++ ))
+                echo -ne "${YELLOW}⚠  File exists and differs: ${BOLD}$relative_path${RESET}\n"
+                echo -ne "${YELLOW}   Overwrite? [Y/n]: ${RESET}"
+                read -r response || true
+
+                if [[ ! "$response" =~ ^[Nn]$ ]]; then
+                    if cp -f "$source_file" "$target_file"; then
+                        success "Overwritten: $relative_path"
+                        (( overwritten++ ))
+                    else
+                        error "Failed to overwrite: $relative_path"
+                        exit 1
+                    fi
+                else
+                    info "Skipped: $relative_path"
+                    (( skipped++ ))
+                fi
             fi
         else
             # File doesn't exist — copy it
@@ -207,11 +268,80 @@ copy_files() {
                 exit 1
             fi
         fi
-    done < <(find "$REPO_ROOT" -type f -not -path '*/.git/*' -print0 | sort -z)
+    done < <(find "$REPO_ROOT" -type f \
+        -not -path '*/.git/*' \
+        -not -path '*/node_modules/*' \
+        -print0 | sort -z)
 
     echo ""
     success "Copy complete: $copied new, $overwritten overwritten, $skipped skipped ($conflicts conflicts)"
     record_summary "files: $copied new, $overwritten overwritten, $skipped skipped"
+}
+
+# ─── install_dependencies ────────────────────────────────────────────────────
+# Install npm dependencies for plugins to work.
+
+install_dependencies() {
+    header "Installing Plugin Dependencies"
+
+    local ran_install=0
+
+    # Root package.json
+    if [[ -f "$CONFIG_DIR/package.json" ]]; then
+        info "Installing root dependencies..."
+        if command -v yarn >/dev/null 2>&1; then
+            if (cd "$CONFIG_DIR" && yarn install --frozen-lockfile 2>/dev/null); then
+                success "Root dependencies installed (yarn)"
+                ran_install=1
+            elif (cd "$CONFIG_DIR" && yarn install 2>/dev/null); then
+                success "Root dependencies installed (yarn)"
+                ran_install=1
+            fi
+        elif command -v npm >/dev/null 2>&1; then
+            if (cd "$CONFIG_DIR" && npm install 2>&1); then
+                success "Root dependencies installed (npm)"
+                ran_install=1
+            fi
+        fi
+
+        if (( ran_install == 0 )); then
+            if command -v yarn >/dev/null 2>&1 || command -v npm >/dev/null 2>&1; then
+                warn "Dependency installation failed — check permissions and network"
+                info "Run 'yarn install' manually in $CONFIG_DIR"
+            else
+                warn "Could not install dependencies — no yarn or npm found"
+                info "Install yarn or npm, then run 'yarn install' in $CONFIG_DIR"
+            fi
+        fi
+    fi
+
+    # profiles/ws/package.json
+    local ws_pkg="$CONFIG_DIR/profiles/ws/package.json"
+    if [[ -f "$ws_pkg" ]]; then
+        info "Installing workspace profile dependencies..."
+        if command -v yarn >/dev/null 2>&1; then
+            if (cd "$CONFIG_DIR/profiles/ws" && yarn install 2>/dev/null); then
+                success "Workspace profile dependencies installed (yarn)"
+                ran_install=1
+            fi
+        elif command -v npm >/dev/null 2>&1; then
+            if (cd "$CONFIG_DIR/profiles/ws" && npm install 2>&1); then
+                success "Workspace profile dependencies installed (npm)"
+                ran_install=1
+            fi
+        fi
+    fi
+
+    if (( ran_install == 0 )); then
+        # Only warn if no package.json was found at all (not a failure case)
+        if [[ ! -f "$CONFIG_DIR/package.json" ]] && [[ ! -f "$CONFIG_DIR/profiles/ws/package.json" ]]; then
+            warn "No package.json found — skipping dependency installation"
+            record_summary "dependencies: none to install"
+        fi
+        # If package.json exists but ran_install is 0, the inner code already warned
+    else
+        record_summary "dependencies: installed"
+    fi
 }
 
 # ─── setup_systemd ───────────────────────────────────────────────────────────
@@ -220,12 +350,22 @@ copy_files() {
 setup_systemd() {
     header "AgentMemory Systemd Service"
 
-    # Check if systemd --user is available
-    if ! systemctl --user status >/dev/null 2>&1; then
-        warn "systemd --user is not available"
-        info "This is normal on WSL, containers, or non-systemd systems"
-        info "You can skip this step and run agentmemory manually when needed"
-        record_summary "systemd: not available (skipped)"
+    # Detect if systemd --user is actually running
+    local systemd_available=false
+    if systemctl --user status >/dev/null 2>&1; then
+        systemd_available=true
+    fi
+
+    if [[ "$systemd_available" != "true" ]]; then
+        warn "systemd --user is not currently available"
+        info "The service file can still be created for future use."
+        info "This is normal on WSL, containers, macOS, or non-systemd systems."
+    fi
+
+    # In non-interactive mode, skip
+    if [[ "$ASSUME_YES" == "true" ]]; then
+        info "Non-interactive mode — skipping systemd setup"
+        record_summary "systemd: skipped (non-interactive mode)"
         return 0
     fi
 
@@ -275,29 +415,144 @@ setup_systemd() {
 
     success "Service file created: $service_file"
 
-    # Reload systemd and enable/start the service
-    info "Reloading systemd daemon..."
-    if systemctl --user daemon-reload; then
-        success "Daemon reloaded"
+    # Reload systemd and enable/start the service (if systemd is available)
+    if [[ "$systemd_available" == "true" ]]; then
+        info "Reloading systemd daemon..."
+        if systemctl --user daemon-reload; then
+            success "Daemon reloaded"
+        else
+            error "Failed to reload systemd daemon"
+            exit 1
+        fi
+
+        info "Enabling and starting agentmemory service..."
+        if systemctl --user enable --now agentmemory.service; then
+            success "AgentMemory service enabled and started"
+            record_summary "systemd: service enabled and running"
+        else
+            warn "Failed to start service — you may need to start it manually:"
+            info "  systemctl --user start agentmemory.service"
+            record_summary "systemd: service file created but failed to start"
+        fi
+
+        # Show service status
+        echo ""
+        info "Service status:"
+        systemctl --user status agentmemory.service --no-pager -l || true
     else
-        error "Failed to reload systemd daemon"
-        exit 1
+        success "Service file created at $service_file"
+        info "To enable it later when systemd is available, run:"
+        info "  systemctl --user daemon-reload"
+        info "  systemctl --user enable --now agentmemory.service"
+        record_summary "systemd: service file created (systemd not available to start)"
+    fi
+}
+
+# ─── configure_agentmemory_env ───────────────────────────────────────────────
+# Prompt to create ~/.config/agentmemory/.env with an API key.
+
+configure_agentmemory_env() {
+    header "AgentMemory Environment Configuration"
+
+    local env_dir="$HOME/.config/agentmemory"
+    local env_file="$env_dir/.env"
+
+    # Skip if already configured and --yes not set
+    if [[ -f "$env_file" ]] && [[ "$ASSUME_YES" != "true" ]]; then
+        info "AgentMemory config already exists at $env_file"
+        echo -ne "${CYAN}ℹ  Override? [y/N]: ${RESET}"
+        read -r response || true
+        if [[ ! "$response" =~ ^[Yy]$ ]]; then
+            info "Skipping agentmemory configuration"
+            record_summary "agentmemory: skipped (existing config kept)"
+            return 0
+        fi
     fi
 
-    info "Enabling and starting agentmemory service..."
-    if systemctl --user enable --now agentmemory.service; then
-        success "AgentMemory service enabled and started"
-        record_summary "systemd: service enabled and running"
-    else
-        warn "Failed to start service — you may need to start it manually:"
-        info "  systemctl --user start agentmemory.service"
-        record_summary "systemd: service file created but failed to start"
+    # In non-interactive mode, skip
+    if [[ "$ASSUME_YES" == "true" ]]; then
+        info "Non-interactive mode — skipping agentmemory .env setup"
+        info "Create $env_file manually with your LLM API key"
+        record_summary "agentmemory: skipped (non-interactive mode)"
+        return 0
     fi
 
-    # Show service status
+    echo -ne "${CYAN}ℹ  Configure AgentMemory with an LLM API key? [y/N]: ${RESET}"
+    read -r response || true
+    if [[ ! "$response" =~ ^[Yy]$ ]]; then
+        info "Skipping agentmemory configuration"
+        record_summary "agentmemory: skipped (user declined)"
+        return 0
+    fi
+
+    # Show provider choices
     echo ""
-    info "Service status:"
-    systemctl --user status agentmemory.service --no-pager -l || true
+    info "Select your LLM provider:"
+    echo "  1) OpenAI  (OPENAI_API_KEY)"
+    echo "  2) Anthropic (ANTHROPIC_API_KEY)"
+    echo "  3) Google  (GOOGLE_API_KEY)"
+    echo "  4) Ollama  (OLLAMA_BASE_URL — local, no key needed)"
+    echo -ne "${CYAN}   Choice [1-4]: ${RESET}"
+    read -r choice || true
+
+    mkdir -p "$env_dir"
+
+    case "$choice" in
+        1)
+            echo -ne "${CYAN}   Enter your OpenAI API key: ${RESET}"
+            read -r api_key || true
+            if [[ -n "$api_key" ]]; then
+                echo "OPENAI_API_KEY=$api_key" > "$env_file"
+                chmod 600 "$env_file"
+                success "AgentMemory configured with OpenAI"
+                record_summary "agentmemory: configured with OpenAI"
+            else
+                warn "No key entered — skipping"
+                record_summary "agentmemory: skipped (no key)"
+            fi
+            ;;
+        2)
+            echo -ne "${CYAN}   Enter your Anthropic API key: ${RESET}"
+            read -r api_key || true
+            if [[ -n "$api_key" ]]; then
+                echo "ANTHROPIC_API_KEY=$api_key" > "$env_file"
+                chmod 600 "$env_file"
+                success "AgentMemory configured with Anthropic"
+                record_summary "agentmemory: configured with Anthropic"
+            else
+                warn "No key entered — skipping"
+                record_summary "agentmemory: skipped (no key)"
+            fi
+            ;;
+        3)
+            echo -ne "${CYAN}   Enter your Google API key: ${RESET}"
+            read -r api_key || true
+            if [[ -n "$api_key" ]]; then
+                echo "GOOGLE_API_KEY=$api_key" > "$env_file"
+                chmod 600 "$env_file"
+                success "AgentMemory configured with Google"
+                record_summary "agentmemory: configured with Google"
+            else
+                warn "No key entered — skipping"
+                record_summary "agentmemory: skipped (no key)"
+            fi
+            ;;
+        4)
+            echo -ne "${CYAN}   Enter your Ollama base URL [http://localhost:11434]: ${RESET}"
+            read -r ollama_url || true
+            if [[ -z "$ollama_url" ]]; then
+                ollama_url="http://localhost:11434"
+            fi
+            echo "OLLAMA_BASE_URL=$ollama_url" > "$env_file"
+            chmod 600 "$env_file"
+            success "AgentMemory configured with Ollama: $ollama_url"
+            record_summary "agentmemory: configured with Ollama"
+            ;;
+        *)
+            warn "Invalid choice — skipping"
+            record_summary "agentmemory: skipped (invalid choice)"
+            ;;
+    esac
 }
 
 # ─── print_summary ───────────────────────────────────────────────────────────
@@ -332,7 +587,9 @@ main() {
     check_prereqs
     backup_existing
     copy_files
+    install_dependencies
     setup_systemd
+    configure_agentmemory_env
     print_summary
 
     exit 0
