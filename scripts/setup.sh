@@ -225,17 +225,17 @@ copy_files() {
             # File exists — check if identical
             if cmp -s "$source_file" "$target_file"; then
                 info "Identical, skipping: $relative_path"
-                (( skipped++ ))
+                skipped=$(( skipped + 1 ))
                 continue
             fi
 
             # File differs — overwrite (with prompt unless -y)
-            (( conflicts++ ))
+            conflicts=$(( conflicts + 1 ))
             if [[ "$ASSUME_YES" == "true" ]]; then
                 # Non-interactive mode — auto-overwrite
                 if cp -f "$source_file" "$target_file"; then
                     success "Overwritten: $relative_path"
-                    (( overwritten++ ))
+                    overwritten=$(( overwritten + 1 ))
                 else
                     error "Failed to overwrite: $relative_path"
                     exit 1
@@ -248,21 +248,21 @@ copy_files() {
                 if [[ ! "$response" =~ ^[Nn]$ ]]; then
                     if cp -f "$source_file" "$target_file"; then
                         success "Overwritten: $relative_path"
-                        (( overwritten++ ))
+                        overwritten=$(( overwritten + 1 ))
                     else
                         error "Failed to overwrite: $relative_path"
                         exit 1
                     fi
                 else
                     info "Skipped: $relative_path"
-                    (( skipped++ ))
+                    skipped=$(( skipped + 1 ))
                 fi
             fi
         else
             # File doesn't exist — copy it
             if cp -p "$source_file" "$target_file"; then
                 success "Copied: $relative_path"
-                (( copied++ ))
+                copied=$(( copied + 1 ))
             else
                 error "Failed to copy: $relative_path"
                 exit 1
@@ -329,16 +329,20 @@ install_dependencies() {
                 success "Workspace profile dependencies installed (npm)"
                 ran_install=1
             fi
+        else
+            # No warning needed — root block already warned about missing package manager
+            :
         fi
     fi
 
     if (( ran_install == 0 )); then
-        # Only warn if no package.json was found at all (not a failure case)
         if [[ ! -f "$CONFIG_DIR/package.json" ]] && [[ ! -f "$CONFIG_DIR/profiles/ws/package.json" ]]; then
             warn "No package.json found — skipping dependency installation"
             record_summary "dependencies: none to install"
+        else
+            # Package.json exists but install failed or no package manager
+            record_summary "dependencies: not installed (no package manager or install failed)"
         fi
-        # If package.json exists but ran_install is 0, the inner code already warned
     else
         record_summary "dependencies: installed"
     fi
@@ -389,16 +393,27 @@ setup_systemd() {
 
     # Resolve agentmemory binary path
     local agentmemory_path
+    local agentmemory_extra_env=""
     if command -v agentmemory >/dev/null 2>&1; then
         agentmemory_path="$(command -v agentmemory)"
     elif command -v npx >/dev/null 2>&1; then
-        agentmemory_path="$(command -v npx) @agentmemory/agentmemory"
+        local npx_bin
+        npx_bin="$(command -v npx)"
+        agentmemory_path="$npx_bin @agentmemory/agentmemory"
+
+        # npx is a Node.js script (shebang: #!/usr/bin/env node).
+        # systemd --user has a minimal PATH that typically doesn't
+        # include NVM/npm/node installation directories. Inject the
+        # node bin directory so the shebang resolves correctly.
+        local node_bin_dir
+        node_bin_dir="$(dirname "$npx_bin")"
+        agentmemory_extra_env="Environment=PATH=$node_bin_dir:/usr/local/bin:/usr/bin:/bin"
     else
         error "agentmemory binary not found — cannot generate service file"
         exit 1
     fi
 
-    # Replace {{HOME}} and {{AGENTMEMORY_PATH}} placeholders and write service file
+    # Replace {{HOME}}, {{AGENTMEMORY_PATH}}, and {{AGENTMEMORY_EXTRA_ENV}} placeholders and write service file
     info "Generating service file with:"
     info "  HOME: $HOME"
     info "  AGENTMEMORY_PATH: $agentmemory_path"
@@ -411,6 +426,7 @@ setup_systemd() {
     sed \
         -e "s|{{HOME}}|$HOME|g" \
         -e "s|{{AGENTMEMORY_PATH}}|$agentmemory_path|g" \
+        -e "s|{{AGENTMEMORY_EXTRA_ENV}}|$agentmemory_extra_env|g" \
         "$template_file" > "$service_file"
 
     success "Service file created: $service_file"
@@ -570,7 +586,9 @@ print_summary() {
     echo -e "${BOLD}Next steps:${RESET}"
     echo -e "  1. Review config at ${CYAN}$CONFIG_DIR${RESET}"
     echo -e "  2. Launch opencode to use the new guardrails"
-    echo -e "  3. If systemd was skipped, run agentmemory manually when needed"
+    echo -e "  3. If dependencies were skipped, run 'cd $CONFIG_DIR && yarn install' (needed for plugins)"
+    echo -e "  4. If systemd was skipped, run agentmemory manually when needed"
+    echo -e "  5. If AgentMemory LLM was not configured, run agentmemory configure or edit $HOME/.config/agentmemory/.env"
     echo ""
     success "Setup complete!"
 }
