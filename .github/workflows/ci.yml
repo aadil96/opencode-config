@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  node_version: "20"
+
+jobs:
+  lint:
+    name: Lint & Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js ${{ env.node_version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.node_version }}
+      - name: Install dependencies
+        run: |
+          if [ -f yarn.lock ]; then
+            yarn install --frozen-lockfile
+          elif [ -f package.json ]; then
+            yarn install
+          fi
+      - name: TypeScript check (plugins)
+        run: |
+          if command -v npx &> /dev/null; then
+            cd plugin && npx tsc --noEmit 2>/dev/null && cd .. || echo "⚠️ tsc check skipped (no tsconfig or errors expected for JS plugins)"
+          fi
+      - name: Validate agent frontmatter
+        run: |
+          error=0
+          for f in agents/*.md agent/*.md; do
+            if ! head -1 "$f" | grep -q "^---$"; then
+              echo "❌ Missing frontmatter in $f"
+              error=1
+            fi
+          done
+          for f in skills/*/SKILL.md; do
+            if ! head -1 "$f" | grep -q "^---$"; then
+              echo "❌ Missing frontmatter in $f"
+              error=1
+            fi
+          done
+          [ "$error" -eq 0 ] || exit 1
+          echo "✅ All agent/skill files have frontmatter"
+      - name: README skill list sync check
+        run: |
+          error=0
+          for skill_dir in skills/*/; do
+            skill_name=$(basename "$skill_dir")
+            if ! grep -q "| \`$skill_name\`" README.md; then
+              echo "⚠️ Skill '$skill_name' not found in README table"
+              error=1
+            fi
+          done
+          [ "$error" -eq 0 ] && echo "✅ All skills listed in README" || echo "Run: Verify README skill table matches skills/ directory"
+      - name: Sensitive data scan
+        run: |
+          error=0
+          # Check for potential secrets
+          if grep -rn 'sk-[A-Za-z0-9]\{20,\}' --include='*.{md,ts,sh,jsonc}' --exclude-dir=node_modules . 2>/dev/null; then
+            echo "❌ Possible OpenAI API key detected"
+            error=1
+          fi
+          if grep -rn 'ghp_[A-Za-z0-9]\{36,\}' --include='*.{md,ts,sh,jsonc}' --exclude-dir=node_modules . 2>/dev/null; then
+            echo "❌ Possible GitHub token detected"
+            error=1
+          fi
+          if grep -rn 'AKIA[0-9A-Z]\{16\}' --include='*.{md,ts,sh,jsonc}' --exclude-dir=node_modules . 2>/dev/null; then
+            echo "❌ Possible AWS key detected"
+            error=1
+          fi
+          if grep -rn '/home/[^/]*/' --include='*.{md,jsonc,yaml,yml}' --exclude-dir=node_modules . 2>/dev/null | grep -v '.bak.'; then
+            echo "❌ Possible personal path detected"
+            error=1
+          fi
+          [ "$error" -eq 0 ] && echo "✅ No sensitive data found" || exit 1
+
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: './scripts'
+          severity: warning

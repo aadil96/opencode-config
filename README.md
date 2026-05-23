@@ -45,7 +45,7 @@ This repo does **not** install OpenCode. It assumes you already have it.
 | `reviewer` | Code review against quality standards |
 | `scribe` | Documentation, changelogs, and human-facing prose |
 
-### Skills (23 Total)
+### Skills (21 Total)
 
 Production-ready workflows that agents invoke for structured decision-making and execution:
 
@@ -53,6 +53,7 @@ Production-ready workflows that agents invoke for structured decision-making and
 |-------|---------|
 | `architecture-principles` | System architecture principles and technology selection criteria |
 | `architecture-lifecycle` | RFCs and ADRs for systematic architecture decisions |
+| `chezmoi-expert` | Expert chezmoi dotfiles management with templates and secrets |
 | `bug-lifecycle` | Triage, fix, and verify bugs through a structured process |
 | `code-philosophy` | The 5 Laws of Elegant Defense — backend code quality standards |
 | `code-review` | Comprehensive review methodology with severity classification |
@@ -64,6 +65,7 @@ Production-ready workflows that agents invoke for structured decision-making and
 | `feature-lifecycle` | Structured process for implementing new features |
 | `frontend-philosophy` | The 5 Pillars of Intentional UI — frontend quality standards |
 | `incident-lifecycle` | Production incident response with minimal impact |
+| `org-audit` | Record organization routing effectiveness and agent selection accuracy |
 | `org-governance` | Shared governance, separation of duties, and interaction patterns |
 | `org-routing` | Agent routing — when to consult each organization role |
 | `plan-protocol` | Guidelines for creating and managing implementation plans |

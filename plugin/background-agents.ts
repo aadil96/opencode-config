@@ -1209,7 +1209,13 @@ ${description}
 ---
 
 `
-			await fs.writeFile(delegation.artifact.filePath, header + content, "utf8")
+			// Sanitize content for persistence
+			const sanitizedContent = content
+				.replace(/(api[_-]?key|secret|token|password|credential)[=:]["']?[^\s"']+/gi, '$1=***REDACTED***')
+				.replace(/sk-[A-Za-z0-9]{20,}/g, 'sk-***REDACTED***')
+				.replace(/ghp_[A-Za-z0-9]{36,}/g, 'ghp_***REDACTED***')
+				.replace(/AKIA[0-9A-Z]{16}/g, 'AKIA***REDACTED***')
+			await fs.writeFile(delegation.artifact.filePath, header + sanitizedContent, "utf8")
 
 			const stats = await fs.stat(delegation.artifact.filePath)
 			this.updateDelegation(delegation.id, (record, now) => {
@@ -1481,10 +1487,14 @@ ${description}
 	 * Log debug messages
 	 */
 	async debugLog(msg: string): Promise<void> {
-		// Only log if debug is enabled (could be env var or static const)
-		// For now, mirroring previous behavior but writing to the new baseDir/debug.log
+		// Sanitize: redact potential secrets from debug logs
+		const sanitized = msg
+			.replace(/(api[_-]?key|secret|token|password|credential)[=:]["']?[^\s"']+/gi, '$1=***REDACTED***')
+			.replace(/sk-[A-Za-z0-9]{20,}/g, 'sk-***REDACTED***')
+			.replace(/ghp_[A-Za-z0-9]{36,}/g, 'ghp_***REDACTED***')
+			.replace(/AKIA[0-9A-Z]{16}/g, 'AKIA***REDACTED***')
 		const timestamp = new Date().toISOString()
-		const line = `${timestamp}: ${msg}\n`
+		const line = `${timestamp}: ${sanitized}\n`
 		const debugFile = path.join(this.baseDir, "background-agents-debug.log")
 
 		try {
