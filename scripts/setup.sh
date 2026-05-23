@@ -328,13 +328,16 @@ install_dependencies() {
 setup_systemd() {
     header "AgentMemory Systemd Service"
 
-    # Check if systemd --user is available
-    if ! systemctl --user status >/dev/null 2>&1; then
-        warn "systemd --user is not available"
-        info "This is normal on WSL, containers, or non-systemd systems"
-        info "You can skip this step and run agentmemory manually when needed"
-        record_summary "systemd: not available (skipped)"
-        return 0
+    # Detect if systemd --user is actually running
+    local systemd_available=false
+    if systemctl --user status >/dev/null 2>&1; then
+        systemd_available=true
+    fi
+
+    if [[ "$systemd_available" != "true" ]]; then
+        warn "systemd --user is not currently available"
+        info "The service file can still be created for future use."
+        info "This is normal on WSL, containers, macOS, or non-systemd systems."
     fi
 
     # In non-interactive mode, skip
@@ -390,29 +393,37 @@ setup_systemd() {
 
     success "Service file created: $service_file"
 
-    # Reload systemd and enable/start the service
-    info "Reloading systemd daemon..."
-    if systemctl --user daemon-reload; then
-        success "Daemon reloaded"
-    else
-        error "Failed to reload systemd daemon"
-        exit 1
-    fi
+    # Reload systemd and enable/start the service (if systemd is available)
+    if [[ "$systemd_available" == "true" ]]; then
+        info "Reloading systemd daemon..."
+        if systemctl --user daemon-reload; then
+            success "Daemon reloaded"
+        else
+            error "Failed to reload systemd daemon"
+            exit 1
+        fi
 
-    info "Enabling and starting agentmemory service..."
-    if systemctl --user enable --now agentmemory.service; then
-        success "AgentMemory service enabled and started"
-        record_summary "systemd: service enabled and running"
-    else
-        warn "Failed to start service — you may need to start it manually:"
-        info "  systemctl --user start agentmemory.service"
-        record_summary "systemd: service file created but failed to start"
-    fi
+        info "Enabling and starting agentmemory service..."
+        if systemctl --user enable --now agentmemory.service; then
+            success "AgentMemory service enabled and started"
+            record_summary "systemd: service enabled and running"
+        else
+            warn "Failed to start service — you may need to start it manually:"
+            info "  systemctl --user start agentmemory.service"
+            record_summary "systemd: service file created but failed to start"
+        fi
 
-    # Show service status
-    echo ""
-    info "Service status:"
-    systemctl --user status agentmemory.service --no-pager -l || true
+        # Show service status
+        echo ""
+        info "Service status:"
+        systemctl --user status agentmemory.service --no-pager -l || true
+    else
+        success "Service file created at $service_file"
+        info "To enable it later when systemd is available, run:"
+        info "  systemctl --user daemon-reload"
+        info "  systemctl --user enable --now agentmemory.service"
+        record_summary "systemd: service file created (systemd not available to start)"
+    fi
 }
 
 # ─── configure_agentmemory_env ───────────────────────────────────────────────
