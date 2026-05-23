@@ -393,16 +393,27 @@ setup_systemd() {
 
     # Resolve agentmemory binary path
     local agentmemory_path
+    local agentmemory_extra_env=""
     if command -v agentmemory >/dev/null 2>&1; then
         agentmemory_path="$(command -v agentmemory)"
     elif command -v npx >/dev/null 2>&1; then
-        agentmemory_path="$(command -v npx) @agentmemory/agentmemory"
+        local npx_bin
+        npx_bin="$(command -v npx)"
+        agentmemory_path="$npx_bin @agentmemory/agentmemory"
+
+        # npx is a Node.js script (shebang: #!/usr/bin/env node).
+        # systemd --user has a minimal PATH that typically doesn't
+        # include NVM/npm/node installation directories. Inject the
+        # node bin directory so the shebang resolves correctly.
+        local node_bin_dir
+        node_bin_dir="$(dirname "$npx_bin")"
+        agentmemory_extra_env="Environment=PATH=$node_bin_dir:/usr/local/bin:/usr/bin:/bin"
     else
         error "agentmemory binary not found — cannot generate service file"
         exit 1
     fi
 
-    # Replace {{HOME}} and {{AGENTMEMORY_PATH}} placeholders and write service file
+    # Replace {{HOME}}, {{AGENTMEMORY_PATH}}, and {{AGENTMEMORY_EXTRA_ENV}} placeholders and write service file
     info "Generating service file with:"
     info "  HOME: $HOME"
     info "  AGENTMEMORY_PATH: $agentmemory_path"
@@ -415,6 +426,7 @@ setup_systemd() {
     sed \
         -e "s|{{HOME}}|$HOME|g" \
         -e "s|{{AGENTMEMORY_PATH}}|$agentmemory_path|g" \
+        -e "s|{{AGENTMEMORY_EXTRA_ENV}}|$agentmemory_extra_env|g" \
         "$template_file" > "$service_file"
 
     success "Service file created: $service_file"
