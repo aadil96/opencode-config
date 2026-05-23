@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2155,SC3043
 #
 # setup.sh — Install OpenCode config guardrails and AgentMemory service
 #
@@ -516,7 +517,8 @@ configure_agentmemory_env() {
     case "$choice" in
         1)
             echo -ne "${CYAN}   Enter your OpenAI API key: ${RESET}"
-            read -r api_key || true
+            read -rs api_key || true
+            echo
             if [[ -n "$api_key" ]]; then
                 echo "OPENAI_API_KEY=$api_key" > "$env_file"
                 chmod 600 "$env_file"
@@ -529,7 +531,8 @@ configure_agentmemory_env() {
             ;;
         2)
             echo -ne "${CYAN}   Enter your Anthropic API key: ${RESET}"
-            read -r api_key || true
+            read -rs api_key || true
+            echo
             if [[ -n "$api_key" ]]; then
                 echo "ANTHROPIC_API_KEY=$api_key" > "$env_file"
                 chmod 600 "$env_file"
@@ -542,7 +545,8 @@ configure_agentmemory_env() {
             ;;
         3)
             echo -ne "${CYAN}   Enter your Google API key: ${RESET}"
-            read -r api_key || true
+            read -rs api_key || true
+            echo
             if [[ -n "$api_key" ]]; then
                 echo "GOOGLE_API_KEY=$api_key" > "$env_file"
                 chmod 600 "$env_file"

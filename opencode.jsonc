@@ -104,7 +104,17 @@
         "edit": "allow",
         "glob": "allow",
         "grep": "allow",
-        "bash": "allow",
+        "bash": {
+          "*": "allow",
+          "rm -rf *": "deny",
+          "sudo *": "deny",
+          "git push --force*": "deny",
+          "git push -f*": "deny",
+          "curl * | sh*": "deny",
+          "curl * | bash*": "deny",
+          "wget * -O- * | sh*": "deny",
+          "wget * -qO- * | sh*": "deny"
+        },
         "plan_read": "deny",
         "todoread": "deny"
       }
