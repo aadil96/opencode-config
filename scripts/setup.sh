@@ -225,17 +225,17 @@ copy_files() {
             # File exists — check if identical
             if cmp -s "$source_file" "$target_file"; then
                 info "Identical, skipping: $relative_path"
-                (( skipped++ ))
+                skipped=$(( skipped + 1 ))
                 continue
             fi
 
             # File differs — overwrite (with prompt unless -y)
-            (( conflicts++ ))
+            conflicts=$(( conflicts + 1 ))
             if [[ "$ASSUME_YES" == "true" ]]; then
                 # Non-interactive mode — auto-overwrite
                 if cp -f "$source_file" "$target_file"; then
                     success "Overwritten: $relative_path"
-                    (( overwritten++ ))
+                    overwritten=$(( overwritten + 1 ))
                 else
                     error "Failed to overwrite: $relative_path"
                     exit 1
@@ -248,21 +248,21 @@ copy_files() {
                 if [[ ! "$response" =~ ^[Nn]$ ]]; then
                     if cp -f "$source_file" "$target_file"; then
                         success "Overwritten: $relative_path"
-                        (( overwritten++ ))
+                        overwritten=$(( overwritten + 1 ))
                     else
                         error "Failed to overwrite: $relative_path"
                         exit 1
                     fi
                 else
                     info "Skipped: $relative_path"
-                    (( skipped++ ))
+                    skipped=$(( skipped + 1 ))
                 fi
             fi
         else
             # File doesn't exist — copy it
             if cp -p "$source_file" "$target_file"; then
                 success "Copied: $relative_path"
-                (( copied++ ))
+                copied=$(( copied + 1 ))
             else
                 error "Failed to copy: $relative_path"
                 exit 1
