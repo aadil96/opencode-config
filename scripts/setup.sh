@@ -15,6 +15,15 @@
 # Idempotent: safe to run multiple times.
 set -euo pipefail
 
+# ─── Sourcing Guard ────────────────────────────────────────────────────────────
+# Prevent the script from exiting the user's shell if sourced.
+
+if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+    echo "Error: This script must be executed, not sourced." >&2
+    echo "Usage: ./scripts/setup.sh [-y|--yes]" >&2
+    return 1
+fi
+
 # ─── Constants ───────────────────────────────────────────────────────────────
 
 readonly CONFIG_DIR="$HOME/.config/opencode"
@@ -22,6 +31,30 @@ readonly SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 readonly TIMESTAMP="$(date -u +"%Y%m%dT%H%M%SZ")"
+
+# ─── Sudo Guard ────────────────────────────────────────────────────────────────
+
+if [[ $EUID -eq 0 ]] && [[ -n "$SUDO_USER" ]]; then
+    echo -e "\033[1;31m✗  Do not run this script with sudo.\033[0m" >&2
+    echo -e "\033[0;36mℹ  Run it as your normal user without sudo.\033[0m"
+    echo -e "\033[0;36mℹ  The script only modifies files in \$HOME and uses systemctl --user.\033[0m"
+    exit 1
+fi
+
+# ─── Color Output ────────────────────────────────────────────────────────────
+
+readonly RED='\033[0;31m'
+readonly GREEN='\033[0;32m'
+readonly YELLOW='\033[1;33m'
+readonly CYAN='\033[0;36m'
+readonly BOLD='\033[1m'
+readonly RESET='\033[0m'
+
+info()    { echo -e "${CYAN}ℹ  $*${RESET}"; }
+success() { echo -e "${GREEN}✓  $*${RESET}"; }
+warn()    { echo -e "${YELLOW}⚠  $*${RESET}"; }
+error()   { echo -e "${RED}✗  $*${RESET}" >&2; }
+header()  { echo -e "\n${BOLD}━━━ $* ━━━${RESET}\n"; }
 
 # ─── CLI Options ──────────────────────────────────────────────────────────────
 
@@ -40,21 +73,6 @@ while [[ "$#" -gt 0 ]]; do
             ;;
     esac
 done
-
-# ─── Color Output ────────────────────────────────────────────────────────────
-
-readonly RED='\033[0;31m'
-readonly GREEN='\033[0;32m'
-readonly YELLOW='\033[1;33m'
-readonly CYAN='\033[0;36m'
-readonly BOLD='\033[1m'
-readonly RESET='\033[0m'
-
-info()    { echo -e "${CYAN}ℹ  $*${RESET}"; }
-success() { echo -e "${GREEN}✓  $*${RESET}"; }
-warn()    { echo -e "${YELLOW}⚠  $*${RESET}"; }
-error()   { echo -e "${RED}✗  $*${RESET}" >&2; }
-header()  { echo -e "\n${BOLD}━━━ $* ━━━${RESET}\n"; }
 
 # ─── Summary Tracking ────────────────────────────────────────────────────────
 
@@ -272,15 +290,15 @@ install_dependencies() {
     if [[ -f "$CONFIG_DIR/package.json" ]]; then
         info "Installing root dependencies..."
         if command -v yarn >/dev/null 2>&1; then
-            if (cd "$CONFIG_DIR" && yarn install --production --frozen-lockfile 2>/dev/null); then
+            if (cd "$CONFIG_DIR" && yarn install --frozen-lockfile 2>/dev/null); then
                 success "Root dependencies installed (yarn)"
                 ran_install=1
-            elif (cd "$CONFIG_DIR" && yarn install --production 2>/dev/null); then
+            elif (cd "$CONFIG_DIR" && yarn install 2>/dev/null); then
                 success "Root dependencies installed (yarn)"
                 ran_install=1
             fi
         elif command -v npm >/dev/null 2>&1; then
-            if (cd "$CONFIG_DIR" && npm install --production 2>&1); then
+            if (cd "$CONFIG_DIR" && npm install 2>&1); then
                 success "Root dependencies installed (npm)"
                 ran_install=1
             fi
@@ -302,12 +320,12 @@ install_dependencies() {
     if [[ -f "$ws_pkg" ]]; then
         info "Installing workspace profile dependencies..."
         if command -v yarn >/dev/null 2>&1; then
-            if (cd "$CONFIG_DIR/profiles/ws" && yarn install --production 2>/dev/null); then
+            if (cd "$CONFIG_DIR/profiles/ws" && yarn install 2>/dev/null); then
                 success "Workspace profile dependencies installed (yarn)"
                 ran_install=1
             fi
         elif command -v npm >/dev/null 2>&1; then
-            if (cd "$CONFIG_DIR/profiles/ws" && npm install --production 2>&1); then
+            if (cd "$CONFIG_DIR/profiles/ws" && npm install 2>&1); then
                 success "Workspace profile dependencies installed (npm)"
                 ran_install=1
             fi
@@ -315,8 +333,12 @@ install_dependencies() {
     fi
 
     if (( ran_install == 0 )); then
-        warn "No dependency directories found to install — skipping"
-        record_summary "dependencies: none to install"
+        # Only warn if no package.json was found at all (not a failure case)
+        if [[ ! -f "$CONFIG_DIR/package.json" ]] && [[ ! -f "$CONFIG_DIR/profiles/ws/package.json" ]]; then
+            warn "No package.json found — skipping dependency installation"
+            record_summary "dependencies: none to install"
+        fi
+        # If package.json exists but ran_install is 0, the inner code already warned
     else
         record_summary "dependencies: installed"
     fi
