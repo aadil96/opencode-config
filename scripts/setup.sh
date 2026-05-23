@@ -329,16 +329,20 @@ install_dependencies() {
                 success "Workspace profile dependencies installed (npm)"
                 ran_install=1
             fi
+        else
+            # No warning needed — root block already warned about missing package manager
+            :
         fi
     fi
 
     if (( ran_install == 0 )); then
-        # Only warn if no package.json was found at all (not a failure case)
         if [[ ! -f "$CONFIG_DIR/package.json" ]] && [[ ! -f "$CONFIG_DIR/profiles/ws/package.json" ]]; then
             warn "No package.json found — skipping dependency installation"
             record_summary "dependencies: none to install"
+        else
+            # Package.json exists but install failed or no package manager
+            record_summary "dependencies: not installed (no package manager or install failed)"
         fi
-        # If package.json exists but ran_install is 0, the inner code already warned
     else
         record_summary "dependencies: installed"
     fi
@@ -570,7 +574,9 @@ print_summary() {
     echo -e "${BOLD}Next steps:${RESET}"
     echo -e "  1. Review config at ${CYAN}$CONFIG_DIR${RESET}"
     echo -e "  2. Launch opencode to use the new guardrails"
-    echo -e "  3. If systemd was skipped, run agentmemory manually when needed"
+    echo -e "  3. If dependencies were skipped, run 'cd $CONFIG_DIR && yarn install' (needed for plugins)"
+    echo -e "  4. If systemd was skipped, run agentmemory manually when needed"
+    echo -e "  5. If AgentMemory LLM was not configured, run agentmemory configure or edit $HOME/.config/agentmemory/.env"
     echo ""
     success "Setup complete!"
 }
